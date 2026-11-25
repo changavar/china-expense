@@ -1,5 +1,5 @@
 /* China Trip Expenses — offline application shell */
-const CACHE_NAME = "china-trip-expenses-v1.1.0";
+const CACHE_NAME = "china-trip-expenses-v1.2.0";
 const APP_SHELL = [
   "./",
   "./index.html",
