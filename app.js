@@ -6,18 +6,24 @@ import {
   setSetting,
   replaceAllData,
   openDatabase,
+  addBackup,
+  getAllBackups,
+  pruneBackups,
+  clearBackups,
+  clearAllData,
 } from "./js/db.js";
 import {
   DEFAULT_EXCHANGE_RATE,
   MAX_AMOUNT_CENTS,
   parseAmountToCents,
-  convertCnyToAedCents,
-  convertAedToCnyCents,
+  convertPrimaryToSecondaryCents,
+  convertSecondaryToPrimaryCents,
   normalizeRate,
   parseRate,
   formatCents,
-  formatCny,
-  formatAed,
+  formatPrimary,
+  formatSecondary,
+  setCurrencyDisplay,
   formatRateLine,
   formatRate,
   centsToInputValue,
@@ -44,24 +50,31 @@ const CATEGORY_ICON_OPTIONS = [
   "medical",
   "star",
   "briefcase",
+  "train",
+  "fuel",
+  "parking",
+  "laundry",
+  "wifi",
+  "movie",
+  "book",
+  "passport",
+  "camera",
+  "fitness",
 ];
 const CATEGORY_TONES = 8;
 const MAX_CUSTOM_CATEGORIES = 40;
 const MAX_CATEGORY_NAME = 24;
-const ENTRY_CURRENCIES = {
-  CNY: {
-    code: "CNY",
-    label: "Amount in Chinese Yuan",
-    prefix: "¥",
-    help: "Enter the amount you paid in CNY.",
-  },
-  AED: {
-    code: "AED",
-    label: "Amount in UAE Dirham",
-    prefix: "AED",
-    help: "Enter the amount you paid in AED.",
-  },
+const MAX_AUTO_BACKUPS = 12;
+
+const DEFAULT_TRIP_PROFILE = {
+  name: "China Trip",
+  primary: { code: "CNY", name: "Chinese Yuan", symbol: "¥" },
+  secondary: { code: "AED", name: "UAE Dirham", symbol: "AED" },
 };
+const MAX_TRIP_NAME = 28;
+const MAX_CURRENCY_NAME = 28;
+const MAX_CURRENCY_SYMBOL = 4;
+const ENTRY_SLOTS = ["primary", "secondary"];
 const VIEW_TITLES = {
   home: "Expenses",
   add: "Add expense",
@@ -76,7 +89,9 @@ const state = {
   expenses: [],
   exchangeRate: DEFAULT_EXCHANGE_RATE,
   customCategories: [],
-  entryCurrency: "CNY",
+  trip: structuredClone(DEFAULT_TRIP_PROFILE),
+  autoBackups: [],
+  entryCurrency: "primary",
   newCategoryIcon: "tag",
   activeView: "home",
   editingId: null,
@@ -93,11 +108,21 @@ const elements = {
   views: [...document.querySelectorAll(".view")],
   navButtons: [...document.querySelectorAll("[data-nav]")],
   screenTitle: document.querySelector("#screen-title"),
+  brandTrip: document.querySelector("#brand-trip"),
+  appMetaName: document.querySelector("#app-meta-name"),
   headerRate: document.querySelector("#header-rate"),
   rateChip: document.querySelector("#rate-chip"),
+  rateChipSecondary: document.querySelector("#rate-chip-secondary"),
+  rateChipPrimary: document.querySelector("#rate-chip-primary"),
 
   totalCny: document.querySelector("#total-cny"),
   totalAed: document.querySelector("#total-aed"),
+  summaryPrimaryCode: document.querySelector("#summary-primary-code"),
+  summaryPrimarySymbol: document.querySelector("#summary-primary-symbol"),
+  summaryPrimaryName: document.querySelector("#summary-primary-name"),
+  summarySecondaryCode: document.querySelector("#summary-secondary-code"),
+  summarySecondarySymbol: document.querySelector("#summary-secondary-symbol"),
+  summarySecondaryName: document.querySelector("#summary-secondary-name"),
   categoryGrid: document.querySelector("#category-grid"),
   recentList: document.querySelector("#recent-list"),
 
@@ -111,6 +136,8 @@ const elements = {
   amountInputWrap: document.querySelector("#amount-input-wrap"),
   currencyToggle: document.querySelector("#currency-toggle"),
   currencyButtons: [...document.querySelectorAll("#currency-toggle [data-currency]")],
+  currencyPrimaryBtn: document.querySelector("#currency-primary-btn"),
+  currencySecondaryBtn: document.querySelector("#currency-secondary-btn"),
   categoryPicker: document.querySelector("#category-picker"),
   convertedPreview: document.querySelector("#converted-preview"),
   previewCurrency: document.querySelector("#preview-currency"),
@@ -124,18 +151,42 @@ const elements = {
   historyCount: document.querySelector("#history-count"),
   historyTotalCny: document.querySelector("#history-total-cny"),
   historyTotalAed: document.querySelector("#history-total-aed"),
+  historyPrimarySymbol: document.querySelector("#history-primary-symbol"),
+  historySecondaryCode: document.querySelector("#history-secondary-code"),
   historySubtitle: document.querySelector("#history-subtitle"),
   historyList: document.querySelector("#history-list"),
 
   rateForm: document.querySelector("#rate-form"),
   rateInput: document.querySelector("#rate-input"),
+  rateHelp: document.querySelector("#rate-help"),
+  rateSecondaryCode: document.querySelector("#rate-secondary-code"),
+  ratePrimaryCode: document.querySelector("#rate-primary-code"),
   rateError: document.querySelector("#rate-error"),
   backupExpenseCount: document.querySelector("#backup-expense-count"),
   backupExpenseNoun: document.querySelector("#backup-expense-noun"),
   backupRate: document.querySelector("#backup-rate"),
+  backupRatePrimary: document.querySelector("#backup-rate-primary"),
   exportJsonBtn: document.querySelector("#export-json-btn"),
   importJsonBtn: document.querySelector("#import-json-btn"),
   importFile: document.querySelector("#import-file"),
+
+  tripForm: document.querySelector("#trip-form"),
+  tripName: document.querySelector("#trip-name"),
+  primaryCode: document.querySelector("#primary-code"),
+  primaryName: document.querySelector("#primary-name"),
+  primarySymbol: document.querySelector("#primary-symbol"),
+  secondaryCode: document.querySelector("#secondary-code"),
+  secondaryName: document.querySelector("#secondary-name"),
+  secondarySymbol: document.querySelector("#secondary-symbol"),
+  currencyLockNote: document.querySelector("#currency-lock-note"),
+  tripError: document.querySelector("#trip-error"),
+  saveTripBtn: document.querySelector("#save-trip-btn"),
+
+  autoBackupList: document.querySelector("#auto-backup-list"),
+  autoBackupNote: document.querySelector("#auto-backup-note"),
+  exportLatestBackupBtn: document.querySelector("#export-latest-backup-btn"),
+  deleteBackupsBtn: document.querySelector("#delete-backups-btn"),
+  resetDataBtn: document.querySelector("#reset-data-btn"),
 
   customCategoryList: document.querySelector("#custom-category-list"),
   categoryForm: document.querySelector("#category-form"),
@@ -150,6 +201,11 @@ const elements = {
   rangeClearBtn: document.querySelector("#range-clear-btn"),
   reportTotalCny: document.querySelector("#report-total-cny"),
   reportTotalAed: document.querySelector("#report-total-aed"),
+  reportPrimaryCode: document.querySelector("#report-primary-code"),
+  reportPrimarySymbol: document.querySelector("#report-primary-symbol"),
+  reportSecondaryCode: document.querySelector("#report-secondary-code"),
+  reportSecondarySymbol: document.querySelector("#report-secondary-symbol"),
+  reportSecondaryName: document.querySelector("#report-secondary-name"),
   reportCountLabel: document.querySelector("#report-count-label"),
   reportCategories: document.querySelector("#report-categories"),
   reportDaily: document.querySelector("#report-daily"),
@@ -284,6 +340,15 @@ function readStoredCategories(value) {
   }
 }
 
+function readStoredTrip(value) {
+  try {
+    return validateTripProfile(value);
+  } catch (error) {
+    console.error("Stored trip settings could not be read", error);
+    return structuredClone(DEFAULT_TRIP_PROFILE);
+  }
+}
+
 function nextCategoryTone() {
   const usage = new Array(CATEGORY_TONES).fill(0);
   BUILTIN_CATEGORIES.forEach((_, index) => {
@@ -344,14 +409,42 @@ function createEmptyState({ icon = "wallet", title, text, actionLabel, actionHan
   return wrap;
 }
 
+/**
+ * Expenses store their destination-currency amount in `primaryCents` and their
+ * home-currency amount in `secondaryCents`. Backups and databases created
+ * before v1.2 used `cnyCents` / `aedCents`; read both so old data keeps working.
+ */
+function primaryOf(expense) {
+  return Number.isSafeInteger(expense?.primaryCents)
+    ? expense.primaryCents
+    : Number.isSafeInteger(expense?.cnyCents)
+      ? expense.cnyCents
+      : 0;
+}
+
+function secondaryOf(expense) {
+  return Number.isSafeInteger(expense?.secondaryCents)
+    ? expense.secondaryCents
+    : Number.isSafeInteger(expense?.aedCents)
+      ? expense.aedCents
+      : 0;
+}
+
+function entrySlotOf(expense) {
+  if (expense?.entryCurrency === "secondary" || expense?.entryCurrency === "AED") {
+    return "secondary";
+  }
+  return "primary";
+}
+
 function sumExpenses(expenses) {
   return expenses.reduce(
     (totals, expense) => {
-      totals.cnyCents += expense.cnyCents;
-      totals.aedCents += expense.aedCents;
+      totals.primaryCents += primaryOf(expense);
+      totals.secondaryCents += secondaryOf(expense);
       return totals;
     },
-    { cnyCents: 0, aedCents: 0 }
+    { primaryCents: 0, secondaryCents: 0 }
   );
 }
 
@@ -362,8 +455,8 @@ function categoryTotals(expenses) {
     return {
       category: meta.name,
       count: items.length,
-      cnyCents: totals.cnyCents,
-      aedCents: totals.aedCents,
+      primaryCents: totals.primaryCents,
+      secondaryCents: totals.secondaryCents,
     };
   });
 }
@@ -415,18 +508,74 @@ function updateRateDisplays() {
   }
 }
 
+/**
+ * Push the active trip name and currency labels into every static label.
+ * Called at startup, after a trip edit and after restoring a backup.
+ */
+function applyTripProfile() {
+  setCurrencyDisplay(state.trip);
+  const tripName = state.trip.name || "My Trip";
+  const primary = state.trip.primary;
+  const secondary = state.trip.secondary;
+
+  setText(elements.brandTrip, tripName.toUpperCase());
+  setText(elements.appMetaName, `${tripName} Expenses`);
+  document.title = `${tripName} Expenses`;
+
+  setText(elements.summaryPrimaryCode, primary.code);
+  setText(elements.summaryPrimarySymbol, primary.symbol);
+  setText(elements.summaryPrimaryName, primary.name);
+  setText(elements.summarySecondaryCode, secondary.code);
+  setText(elements.summarySecondarySymbol, secondary.symbol);
+  setText(elements.summarySecondaryName, secondary.name);
+
+  setText(elements.rateChipSecondary, secondary.code);
+  setText(elements.rateChipPrimary, primary.code);
+  setText(elements.rateSecondaryCode, secondary.code);
+  setText(elements.ratePrimaryCode, primary.code);
+  setText(elements.backupRatePrimary, primary.code);
+  setText(elements.historyPrimarySymbol, primary.symbol);
+  setText(elements.historySecondaryCode, secondary.code);
+  setText(elements.reportPrimaryCode, primary.code);
+  setText(elements.reportPrimarySymbol, primary.symbol);
+  setText(elements.reportSecondaryCode, secondary.code);
+  setText(elements.reportSecondarySymbol, secondary.symbol);
+  setText(elements.reportSecondaryName, secondary.name);
+  setText(elements.currencyPrimaryBtn, primary.code);
+  setText(elements.currencySecondaryBtn, secondary.code);
+  elements.currencySecondaryBtn.classList.toggle(
+    "currency-toggle-wide",
+    secondary.symbol.length > 2
+  );
+  elements.rateHelp.textContent = `How many ${primary.code} one ${secondary.code} is worth. Existing expenses keep the rate they were saved with.`;
+  updateEntryCurrencyUI();
+}
+
 function currentEntryRate() {
   return state.editingId ? state.editingRate : state.exchangeRate;
 }
 
+function entryCurrencyMeta(slot = state.entryCurrency) {
+  const currency = state.trip[slot] || state.trip.primary;
+  return {
+    slot,
+    code: currency.code,
+    name: currency.name,
+    symbol: currency.symbol,
+    label: `Amount in ${currency.name}`,
+    prefix: currency.symbol,
+    help: `Enter the amount you paid in ${currency.code}.`,
+  };
+}
+
 function updateEntryCurrencyUI() {
-  const config = ENTRY_CURRENCIES[state.entryCurrency];
+  const config = entryCurrencyMeta();
   setText(elements.amountLabel, config.label);
   setText(elements.amountHelp, config.help);
   setText(elements.amountPrefix, config.prefix);
   elements.amountPrefix.classList.toggle(
     "amount-prefix-text",
-    state.entryCurrency === "AED"
+    config.symbol.length > 1
   );
   for (const button of elements.currencyButtons) {
     button.setAttribute(
@@ -443,14 +592,15 @@ function updateConversionPreview() {
   let converted = null;
   if (cents !== null) {
     converted =
-      state.entryCurrency === "CNY"
-        ? convertCnyToAedCents(cents, rate)
-        : convertAedToCnyCents(cents, rate);
+      state.entryCurrency === "primary"
+        ? convertPrimaryToSecondaryCents(cents, rate)
+        : convertSecondaryToPrimaryCents(cents, rate);
   }
 
   setText(
     elements.previewCurrency,
-    state.entryCurrency === "CNY" ? "AED" : "CNY"
+    entryCurrencyMeta(state.entryCurrency === "primary" ? "secondary" : "primary")
+      .code
   );
   setText(
     elements.convertedPreview,
@@ -470,16 +620,16 @@ function updateConversionPreview() {
 }
 
 function switchEntryCurrency(next) {
-  if (!ENTRY_CURRENCIES[next] || next === state.entryCurrency) return;
+  if (!ENTRY_SLOTS.includes(next) || next === state.entryCurrency) return;
   const rate = currentEntryRate();
   const cents = parseAmountToCents(elements.expenseAmount.value);
 
   state.entryCurrency = next;
   if (cents !== null) {
     const converted =
-      next === "CNY"
-        ? convertAedToCnyCents(cents, rate)
-        : convertCnyToAedCents(cents, rate);
+      next === "primary"
+        ? convertSecondaryToPrimaryCents(cents, rate)
+        : convertPrimaryToSecondaryCents(cents, rate);
     elements.expenseAmount.value =
       converted === null ? "" : centsToInputValue(converted);
   }
@@ -503,18 +653,18 @@ function createCategoryCard(category) {
   count.dataset.categoryCount = category.category;
   top.append(icon, count);
 
-  const aed = createEl("span", "", formatAed(category.aedCents));
-  aed.dataset.categoryAed = category.category;
-  const aedLine = createEl("p", "category-total");
-  aedLine.append(aed);
+  const secondary = createEl("span", "", formatSecondary(category.secondaryCents));
+  secondary.dataset.categoryAed = category.category;
+  const secondaryLine = createEl("p", "category-total");
+  secondaryLine.append(secondary);
 
-  const cny = createEl("span", "", formatCny(category.cnyCents));
-  cny.dataset.categoryCny = category.category;
-  const cnyLine = createEl("p", "category-total-cny");
-  cnyLine.append(cny);
+  const primary = createEl("span", "", formatPrimary(category.primaryCents));
+  primary.dataset.categoryCny = category.category;
+  const primaryLine = createEl("p", "category-total-cny");
+  primaryLine.append(primary);
 
   const body = createEl("div");
-  body.append(createEl("h3", "", category.category), aedLine, cnyLine);
+  body.append(createEl("h3", "", category.category), secondaryLine, primaryLine);
   card.append(top, body);
   return card;
 }
@@ -523,8 +673,8 @@ function renderHome() {
   const totals = sumExpenses(state.expenses);
   const categories = categoryTotals(state.expenses);
 
-  setText(elements.totalCny, formatCents(totals.cnyCents));
-  setText(elements.totalAed, formatCents(totals.aedCents));
+  setText(elements.totalCny, formatCents(totals.primaryCents));
+  setText(elements.totalAed, formatCents(totals.secondaryCents));
 
   elements.categoryGrid.replaceChildren(...categories.map(createCategoryCard));
   elements.recentList.replaceChildren();
@@ -571,8 +721,8 @@ function renderHome() {
 
     const amounts = createEl("div", "recent-amount");
     amounts.append(
-      createEl("strong", "", formatAed(expense.aedCents)),
-      createEl("span", "", formatCny(expense.cnyCents))
+      createEl("strong", "", formatSecondary(secondaryOf(expense))),
+      createEl("span", "", formatPrimary(primaryOf(expense)))
     );
 
     row.append(createCategoryIcon(expense.category), copy, amounts);
@@ -618,8 +768,8 @@ function createExpenseHistoryItem(expense) {
 
   const amounts = createEl("div", "expense-amounts");
   amounts.append(
-    createEl("span", "amount-aed", formatAed(expense.aedCents)),
-    createEl("span", "amount-cny", formatCny(expense.cnyCents))
+    createEl("span", "amount-aed", formatSecondary(secondaryOf(expense))),
+    createEl("span", "amount-cny", formatPrimary(primaryOf(expense)))
   );
 
   copy.append(titleRow, meta, amounts);
@@ -646,8 +796,8 @@ function createExpenseHistoryItem(expense) {
 function renderHistory() {
   const totals = sumExpenses(state.expenses);
   setText(elements.historyCount, String(state.expenses.length));
-  setText(elements.historyTotalCny, formatCents(totals.cnyCents));
-  setText(elements.historyTotalAed, formatCents(totals.aedCents));
+  setText(elements.historyTotalCny, formatCents(totals.primaryCents));
+  setText(elements.historyTotalAed, formatCents(totals.secondaryCents));
   setText(
     elements.historySubtitle,
     state.expenses.length
@@ -688,7 +838,7 @@ function renderHistory() {
     const totalsForDay = sumExpenses(expenses);
     header.append(
       createEl("h2", "", formatGroupDate(date)),
-      createEl("span", "", formatAed(totalsForDay.aedCents))
+      createEl("span", "", formatSecondary(totalsForDay.secondaryCents))
     );
 
     const list = createEl("div", "expense-list");
@@ -738,6 +888,85 @@ function renderCustomCategories() {
   }
 }
 
+function renderTripSettings() {
+  const locked = state.expenses.length > 0;
+  elements.tripName.value = state.trip.name;
+  elements.primaryCode.value = state.trip.primary.code;
+  elements.primaryName.value = state.trip.primary.name;
+  elements.primarySymbol.value = state.trip.primary.symbol;
+  elements.secondaryCode.value = state.trip.secondary.code;
+  elements.secondaryName.value = state.trip.secondary.name;
+  elements.secondarySymbol.value = state.trip.secondary.symbol;
+
+  for (const input of [
+    elements.primaryCode,
+    elements.primaryName,
+    elements.primarySymbol,
+    elements.secondaryCode,
+    elements.secondaryName,
+    elements.secondarySymbol,
+  ]) {
+    input.disabled = locked;
+  }
+  elements.currencyLockNote.hidden = !locked;
+  elements.tripError.hidden = true;
+}
+
+function renderAutoBackups() {
+  elements.autoBackupList.replaceChildren();
+
+  if (!state.autoBackups.length) {
+    elements.autoBackupList.append(
+      createEl(
+        "p",
+        "custom-category-empty",
+        "No automatic backups yet. One is saved after every change."
+      )
+    );
+    elements.exportLatestBackupBtn.disabled = true;
+    elements.deleteBackupsBtn.disabled = true;
+    return;
+  }
+
+  elements.exportLatestBackupBtn.disabled = false;
+  elements.deleteBackupsBtn.disabled = false;
+
+  for (const backup of state.autoBackups) {
+    const row = createEl("div", "auto-backup-row");
+    const copy = createEl("div", "auto-backup-copy");
+    const when = backup.createdAt ? new Date(backup.createdAt) : null;
+    const label =
+      when && Number.isFinite(when.getTime())
+        ? new Intl.DateTimeFormat("en-GB", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }).format(when)
+        : "Unknown time";
+    const count = backup.payload?.expenses?.length ?? backup.expenseCount ?? 0;
+    copy.append(
+      createEl("strong", "", label),
+      createEl(
+        "span",
+        "",
+        `${count} expense${count === 1 ? "" : "s"}${
+          backup.reason ? ` · ${backup.reason}` : ""
+        }`
+      )
+    );
+
+    const download = createEl("button", "auto-backup-export");
+    download.type = "button";
+    download.dataset.exportBackup = backup.id;
+    download.setAttribute("aria-label", `Export backup from ${label}`);
+    download.append(createIcon("download"));
+
+    row.append(copy, download);
+    elements.autoBackupList.append(row);
+  }
+}
+
 function renderSettings() {
   updateRateDisplays();
   setText(elements.backupExpenseCount, String(state.expenses.length));
@@ -746,7 +975,9 @@ function renderSettings() {
     state.expenses.length === 1 ? "expense" : "expenses"
   );
   setText(elements.backupRate, formatRate(state.exchangeRate));
+  renderTripSettings();
   renderCustomCategories();
+  renderAutoBackups();
 }
 
 function getReportFilter() {
@@ -790,7 +1021,7 @@ function setRangeError(message) {
   elements.rangeError.hidden = !message;
 }
 
-function createReportCategoryRow(category, totalCny) {
+function createReportCategoryRow(category, totalPrimary) {
   const meta = getCategoryMeta(category.category);
   const row = createEl("div", `breakdown-row ${meta.className}`);
   const top = createEl("div", "breakdown-top");
@@ -803,14 +1034,19 @@ function createReportCategoryRow(category, totalCny) {
     `${category.category} · ${category.count}`
   );
 
-  const amount = createEl("div", "breakdown-amount", formatAed(category.aedCents));
-  amount.append(createEl("small", "", formatCny(category.cnyCents)));
+  const amount = createEl(
+    "div",
+    "breakdown-amount",
+    formatSecondary(category.secondaryCents)
+  );
+  amount.append(createEl("small", "", formatPrimary(category.primaryCents)));
 
   top.append(icon, name, amount);
 
   const bar = createEl("div", "breakdown-bar");
   const fill = createEl("span");
-  const percent = totalCny > 0 ? (category.cnyCents / totalCny) * 100 : 0;
+  const percent =
+    totalPrimary > 0 ? (category.primaryCents / totalPrimary) * 100 : 0;
   fill.style.width = `${Math.max(percent > 0 ? 2 : 0, percent).toFixed(2)}%`;
   bar.append(fill);
 
@@ -838,8 +1074,8 @@ function renderReports() {
     setText(elements.rangeSummary, "All recorded expenses");
   }
 
-  setText(elements.reportTotalCny, formatCents(totals.cnyCents));
-  setText(elements.reportTotalAed, formatCents(totals.aedCents));
+  setText(elements.reportTotalCny, formatCents(totals.primaryCents));
+  setText(elements.reportTotalAed, formatCents(totals.secondaryCents));
   setText(
     elements.reportCountLabel,
     `${filtered.length} expense${filtered.length === 1 ? "" : "s"}`
@@ -856,7 +1092,7 @@ function renderReports() {
   elements.reportCategories.replaceChildren();
   for (const category of categories) {
     elements.reportCategories.append(
-      createReportCategoryRow(category, totals.cnyCents)
+      createReportCategoryRow(category, totals.primaryCents)
     );
   }
 
@@ -896,8 +1132,8 @@ function renderReports() {
       const dayTotals = sumExpenses(expenses);
       const amounts = createEl("div", "daily-amounts");
       amounts.append(
-        createEl("strong", "", formatAed(dayTotals.aedCents)),
-        createEl("span", "", formatCny(dayTotals.cnyCents))
+        createEl("strong", "", formatSecondary(dayTotals.secondaryCents)),
+        createEl("span", "", formatPrimary(dayTotals.primaryCents))
       );
 
       row.append(copy, amounts);
@@ -1005,10 +1241,12 @@ function startEditExpense(id) {
 
   state.editingId = expense.id;
   state.editingRate = expense.exchangeRate;
-  state.entryCurrency = expense.entryCurrency === "AED" ? "AED" : "CNY";
+  state.entryCurrency = entrySlotOf(expense);
   renderCategoryPicker(expense.category);
   elements.expenseAmount.value = centsToInputValue(
-    state.entryCurrency === "AED" ? expense.aedCents : expense.cnyCents
+    state.entryCurrency === "secondary"
+      ? secondaryOf(expense)
+      : primaryOf(expense)
   );
   elements.expenseDate.value = expense.date;
   elements.expenseDescription.value = expense.description || "";
@@ -1047,7 +1285,7 @@ async function handleExpenseSubmit(event) {
   }
   if (sourceCents === null) {
     showFormError(
-      `Enter a positive ${state.entryCurrency} amount with up to 2 decimal places.`
+      `Enter a positive ${entryCurrencyMeta().code} amount with up to 2 decimal places.`
     );
     elements.expenseAmount.focus();
     return;
@@ -1062,21 +1300,24 @@ async function handleExpenseSubmit(event) {
     return;
   }
 
-  let cnyCents;
-  let aedCents;
-  if (state.entryCurrency === "AED") {
-    aedCents = sourceCents;
-    cnyCents = convertAedToCnyCents(aedCents, rate);
+  let primaryCents;
+  let secondaryCents;
+  if (state.entryCurrency === "secondary") {
+    secondaryCents = sourceCents;
+    primaryCents = convertSecondaryToPrimaryCents(secondaryCents, rate);
   } else {
-    cnyCents = sourceCents;
-    aedCents = convertCnyToAedCents(cnyCents, rate);
+    primaryCents = sourceCents;
+    secondaryCents = convertPrimaryToSecondaryCents(primaryCents, rate);
   }
 
-  if (cnyCents === null || cnyCents <= 0 || aedCents === null) {
+  if (primaryCents === null || primaryCents <= 0 || secondaryCents === null) {
     showFormError("That amount is too small for the saved exchange rate.");
     return;
   }
-  if (cnyCents > MAX_AMOUNT_CENTS || aedCents > MAX_AMOUNT_CENTS) {
+  if (
+    primaryCents > MAX_AMOUNT_CENTS ||
+    secondaryCents > MAX_AMOUNT_CENTS
+  ) {
     showFormError("That amount is too large.");
     return;
   }
@@ -1085,8 +1326,8 @@ async function handleExpenseSubmit(event) {
   const expense = {
     id: editing ? editing.id : makeExpenseId(),
     category,
-    cnyCents,
-    aedCents,
+    primaryCents,
+    secondaryCents,
     exchangeRate: rate,
     entryCurrency: state.entryCurrency,
     date,
@@ -1115,6 +1356,7 @@ async function handleExpenseSubmit(event) {
     state.editingRate = null;
     startNewExpense();
     renderAll();
+    await captureAutoBackup(wasEditing ? "after edit" : "after expense");
     showToast(wasEditing ? "Expense updated" : "Expense saved");
 
     if (wasEditing) {
@@ -1145,8 +1387,8 @@ function confirmDeleteExpense(id) {
     icon: "trash",
     danger: true,
     title: "Delete this expense?",
-    message: `"${expense.description || expense.category}" for ${formatCny(
-      expense.cnyCents
+    message: `"${expense.description || expense.category}" for ${formatPrimary(
+      primaryOf(expense)
     )} will be permanently removed from this iPhone. Totals will update immediately.`,
     confirmLabel: "Delete",
     async onConfirm() {
@@ -1154,6 +1396,7 @@ function confirmDeleteExpense(id) {
       state.expenses = state.expenses.filter((item) => item.id !== id);
       if (state.editingId === id) startNewExpense();
       renderAll();
+      await captureAutoBackup("after delete");
       showToast("Expense deleted");
     },
   });
@@ -1180,11 +1423,142 @@ async function handleRateSubmit(event) {
     updateRateDisplays();
     updateConversionPreview();
     renderAll();
-    showToast(`Rate saved · 1 AED = ${formatRate(rate)} CNY`);
+    await captureAutoBackup("after rate change");
+    showToast(
+      `Rate saved · 1 ${state.trip.secondary.code} = ${formatRate(rate)} ${state.trip.primary.code}`
+    );
   } catch (error) {
     console.error(error);
     showRateError("Could not save the exchange rate on this device.");
   }
+}
+
+function showTripError(message) {
+  elements.tripError.textContent = message;
+  elements.tripError.hidden = !message;
+}
+
+function readCurrencyInputs(prefix) {
+  return {
+    code: elements[`${prefix}Code`].value.trim().toUpperCase(),
+    name: elements[`${prefix}Name`].value.trim().replace(/\s+/g, " "),
+    symbol: elements[`${prefix}Symbol`].value.trim(),
+  };
+}
+
+async function handleTripSubmit(event) {
+  event.preventDefault();
+  showTripError("");
+
+  const name =
+    elements.tripName.value.trim().replace(/\s+/g, " ").slice(0, MAX_TRIP_NAME) ||
+    "My Trip";
+  const primary = readCurrencyInputs("primary");
+  const secondary = readCurrencyInputs("secondary");
+
+  if (state.expenses.length) {
+    // Currency fields are disabled while expenses exist, so keep the old ones.
+    primary.code = state.trip.primary.code;
+    primary.name = state.trip.primary.name;
+    primary.symbol = state.trip.primary.symbol;
+    secondary.code = state.trip.secondary.code;
+    secondary.name = state.trip.secondary.name;
+    secondary.symbol = state.trip.secondary.symbol;
+  }
+
+  if (!/^[A-Z0-9]{2,5}$/.test(primary.code) || !/^[A-Z0-9]{2,5}$/.test(secondary.code)) {
+    showTripError("Currency codes must be 2–5 letters or digits.");
+    return;
+  }
+  if (
+    !primary.name ||
+    primary.name.length > MAX_CURRENCY_NAME ||
+    !secondary.name ||
+    secondary.name.length > MAX_CURRENCY_NAME
+  ) {
+    showTripError(`Currency names must be 1–${MAX_CURRENCY_NAME} characters.`);
+    return;
+  }
+  if (
+    !primary.symbol ||
+    primary.symbol.length > MAX_CURRENCY_SYMBOL ||
+    !secondary.symbol ||
+    secondary.symbol.length > MAX_CURRENCY_SYMBOL
+  ) {
+    showTripError(`Currency symbols must be 1–${MAX_CURRENCY_SYMBOL} characters.`);
+    return;
+  }
+  if (primary.code === secondary.code) {
+    showTripError("Choose two different currency codes.");
+    return;
+  }
+
+  const next = { name, primary, secondary };
+  try {
+    await setSetting("tripProfile", next);
+    state.trip = next;
+    applyTripProfile();
+    renderAll();
+    await captureAutoBackup("after trip change");
+    showToast("Trip settings saved");
+  } catch (error) {
+    console.error(error);
+    showTripError("Could not save the trip settings on this device.");
+  }
+}
+
+function confirmResetData() {
+  openModal({
+    icon: "alert",
+    danger: true,
+    title: "Reset all data?",
+    message:
+      "This removes every expense, custom category, the trip name, both currencies and the exchange rate from this iPhone. A recovery snapshot is saved in Automatic backups first. This cannot be undone.",
+    confirmLabel: "Reset everything",
+    async onConfirm() {
+      await captureAutoBackup("before reset");
+      await clearAllData();
+      state.expenses = [];
+      state.exchangeRate = DEFAULT_EXCHANGE_RATE;
+      state.customCategories = [];
+      state.trip = structuredClone(DEFAULT_TRIP_PROFILE);
+      state.entryCurrency = "primary";
+      state.editingId = null;
+      state.editingRate = null;
+      applyTripProfile();
+      startNewExpense();
+      renderCategoryPicker("Food");
+      renderAll();
+      navigate("home");
+      showToast("All data reset");
+    },
+  });
+}
+
+function exportLatestBackup() {
+  const [latest] = state.autoBackups;
+  if (!latest) {
+    showToast("No automatic backup to export yet.", "error");
+    return;
+  }
+  exportSnapshot(latest);
+}
+
+function confirmDeleteBackups() {
+  if (!state.autoBackups.length) return;
+  openModal({
+    icon: "trash",
+    danger: true,
+    title: "Delete automatic backups?",
+    message: `All ${state.autoBackups.length} on-device snapshots will be removed. Your current expenses stay untouched.`,
+    confirmLabel: "Delete backups",
+    async onConfirm() {
+      await clearBackups();
+      state.autoBackups = [];
+      renderAutoBackups();
+      showToast("Automatic backups deleted");
+    },
+  });
 }
 
 function showCategoryError(message) {
@@ -1249,6 +1623,7 @@ async function handleCategorySubmit(event) {
     elements.categoryName.value = "";
     renderAll();
     renderCategoryPicker(getSelectedCategory());
+    await captureAutoBackup("after category added");
     showToast(`Category "${name}" added`);
   } catch (error) {
     console.error(error);
@@ -1289,6 +1664,7 @@ function confirmDeleteCategory(name) {
       state.customCategories = next;
       renderAll();
       renderCategoryPicker(getSelectedCategory());
+      await captureAutoBackup("after category deleted");
       showToast("Category deleted");
     },
   });
@@ -1297,7 +1673,7 @@ function confirmDeleteCategory(name) {
 function backupPayload() {
   return {
     app: "China Trip Expenses",
-    schemaVersion: 2,
+    schemaVersion: 3,
     exportedAt: new Date().toISOString(),
     settings: {
       exchangeRate: state.exchangeRate,
@@ -1306,20 +1682,64 @@ function backupPayload() {
         icon: category.icon,
         tone: category.tone,
       })),
+      tripProfile: structuredClone(state.trip),
     },
     expenses: sortedNewestFirst().map((expense) => ({
       id: expense.id,
       category: expense.category,
       description: expense.description || "",
       date: expense.date,
-      cnyCents: expense.cnyCents,
-      aedCents: expense.aedCents,
+      primaryCents: primaryOf(expense),
+      secondaryCents: secondaryOf(expense),
       exchangeRate: expense.exchangeRate,
-      entryCurrency: expense.entryCurrency === "AED" ? "AED" : "CNY",
+      entryCurrency: entrySlotOf(expense),
       createdAt: expense.createdAt,
       updatedAt: expense.updatedAt,
     })),
   };
+}
+
+function makeBackupId() {
+  return `bk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Save an on-device snapshot after every change. iPhone cannot silently write
+ * to a user-chosen folder, so snapshots live in IndexedDB until exported.
+ */
+async function captureAutoBackup(reason) {
+  try {
+    const payload = backupPayload();
+    const createdAt = new Date().toISOString();
+    await addBackup({
+      id: makeBackupId(),
+      createdAt,
+      reason,
+      expenseCount: payload.expenses.length,
+      payload,
+    });
+    await pruneBackups(MAX_AUTO_BACKUPS);
+    state.autoBackups = await getAllBackups();
+    renderAutoBackups();
+  } catch (error) {
+    console.error("Automatic backup failed", error);
+  }
+}
+
+function exportSnapshot(snapshot) {
+  if (!snapshot?.payload) {
+    showToast("That backup could not be exported.", "error");
+    return;
+  }
+  const json = JSON.stringify(snapshot.payload, null, 2);
+  const stamp = snapshot.createdAt
+    ? snapshot.createdAt.slice(0, 19).replace(/[:T]/g, "-")
+    : dateStamp();
+  downloadBlob(
+    new Blob([json], { type: "application/json;charset=utf-8" }),
+    `china-trip-expenses-backup-${stamp}.json`
+  );
+  showToast("Backup exported to Files");
 }
 
 function dateStamp() {
@@ -1347,13 +1767,44 @@ function exportJsonBackup() {
   showToast("JSON backup exported");
 }
 
+function validateCurrencyProfile(raw, label) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(`The backup is missing its ${label} currency.`);
+  }
+  const code = String(raw.code ?? "").trim().toUpperCase();
+  const name = String(raw.name ?? "").trim();
+  const symbol = String(raw.symbol ?? "").trim();
+  if (!/^[A-Z0-9]{2,5}$/.test(code)) {
+    throw new Error(`The backup has an invalid ${label} currency code.`);
+  }
+  if (!name || name.length > MAX_CURRENCY_NAME) {
+    throw new Error(`The backup has an invalid ${label} currency name.`);
+  }
+  if (!symbol || symbol.length > MAX_CURRENCY_SYMBOL) {
+    throw new Error(`The backup has an invalid ${label} currency symbol.`);
+  }
+  return { code, name, symbol };
+}
+
+function validateTripProfile(raw) {
+  if (!raw || typeof raw !== "object") {
+    return structuredClone(DEFAULT_TRIP_PROFILE);
+  }
+  const name = String(raw.name ?? "").trim().slice(0, MAX_TRIP_NAME);
+  return {
+    name: name || DEFAULT_TRIP_PROFILE.name,
+    primary: validateCurrencyProfile(raw.primary, "destination"),
+    secondary: validateCurrencyProfile(raw.secondary, "home"),
+  };
+}
+
 function validateBackup(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("The file does not contain a backup object.");
   }
-  if (data.schemaVersion !== 1 && data.schemaVersion !== 2) {
+  if (![1, 2, 3].includes(data.schemaVersion)) {
     throw new Error(
-      "Unsupported backup version. Expected schemaVersion 1 or 2."
+      "Unsupported backup version. Expected schemaVersion 1, 2 or 3."
     );
   }
   if (!data.settings || typeof data.settings !== "object") {
@@ -1368,6 +1819,10 @@ function validateBackup(data) {
     data.schemaVersion >= 2
       ? validateCustomCategories(data.settings.customCategories)
       : [];
+  const trip =
+    data.schemaVersion >= 3
+      ? validateTripProfile(data.settings.tripProfile)
+      : structuredClone(DEFAULT_TRIP_PROFILE);
   const knownCategories = new Set([
     ...BUILTIN_CATEGORIES.map((category) => category.name),
     ...customCategories.map((category) => category.name),
@@ -1408,30 +1863,47 @@ function validateBackup(data) {
     ) {
       throw new Error(`${label} has an invalid description.`);
     }
-    if (
-      !Number.isSafeInteger(raw.cnyCents) ||
-      raw.cnyCents <= 0
-    ) {
-      throw new Error(`${label} has an invalid CNY amount.`);
+
+    const primaryCents = Number.isSafeInteger(raw.primaryCents)
+      ? raw.primaryCents
+      : raw.cnyCents;
+    const secondaryCents = Number.isSafeInteger(raw.secondaryCents)
+      ? raw.secondaryCents
+      : raw.aedCents;
+    if (!Number.isSafeInteger(primaryCents) || primaryCents <= 0) {
+      throw new Error(`${label} has an invalid destination amount.`);
     }
-    if (!Number.isSafeInteger(raw.aedCents) || raw.aedCents < 0) {
-      throw new Error(`${label} has an invalid AED amount.`);
+    if (!Number.isSafeInteger(secondaryCents) || secondaryCents < 0) {
+      throw new Error(`${label} has an invalid home-currency amount.`);
     }
+
     const rate = normalizeRate(raw.exchangeRate);
     if (!rate) {
       throw new Error(`${label} has an invalid saved exchange rate.`);
     }
+
+    const rawEntry =
+      raw.entryCurrency === undefined
+        ? data.schemaVersion >= 3
+          ? "primary"
+          : "CNY"
+        : raw.entryCurrency;
     const entryCurrency =
-      raw.entryCurrency === undefined ? "CNY" : raw.entryCurrency;
-    if (entryCurrency !== "CNY" && entryCurrency !== "AED") {
+      rawEntry === "secondary" || rawEntry === "AED" ? "secondary" : "primary";
+    if (
+      !["primary", "secondary", "CNY", "AED"].includes(rawEntry)
+    ) {
       throw new Error(`${label} has an invalid entry currency.`);
     }
+
     // Amounts entered in either currency are valid when the saved pair
     // matches the rate in that direction.
-    const fromCny = convertCnyToAedCents(raw.cnyCents, rate);
-    const fromAed = convertAedToCnyCents(raw.aedCents, rate);
-    if (fromCny !== raw.aedCents && fromAed !== raw.cnyCents) {
-      throw new Error(`${label} has AED and CNY amounts that do not match its saved rate.`);
+    const fromPrimary = convertPrimaryToSecondaryCents(primaryCents, rate);
+    const fromSecondary = convertSecondaryToPrimaryCents(secondaryCents, rate);
+    if (fromPrimary !== secondaryCents && fromSecondary !== primaryCents) {
+      throw new Error(
+        `${label} has amounts that do not match its saved rate.`
+      );
     }
     if (
       typeof raw.createdAt !== "string" ||
@@ -1452,8 +1924,8 @@ function validateBackup(data) {
       category: raw.category,
       description: raw.description,
       date: raw.date,
-      cnyCents: raw.cnyCents,
-      aedCents: raw.aedCents,
+      primaryCents,
+      secondaryCents,
       exchangeRate: rate,
       entryCurrency,
       createdAt: raw.createdAt,
@@ -1461,7 +1933,7 @@ function validateBackup(data) {
     };
   });
 
-  return { exchangeRate, customCategories, expenses };
+  return { exchangeRate, customCategories, trip, expenses };
 }
 
 async function importBackupFile(file) {
@@ -1496,26 +1968,31 @@ async function importBackupFile(file) {
       backup.expenses.length === 1 ? "" : "s"
     }, ${backup.customCategories.length} custom categor${
       backup.customCategories.length === 1 ? "y" : "ies"
-    } and a rate of 1 AED = ${formatRate(
+    } and a rate of 1 ${backup.trip.secondary.code} = ${formatRate(
       backup.exchangeRate
-    )} CNY. Your current ${state.expenses.length} expense${
+    )} ${backup.trip.primary.code}. Your current ${state.expenses.length} expense${
       state.expenses.length === 1 ? "" : "s"
     } will be permanently replaced. This cannot be undone.`,
     confirmLabel: "Replace data",
     danger: true,
     async onConfirm() {
+      await captureAutoBackup("before import");
       await replaceAllData(
         backup.expenses,
         backup.exchangeRate,
-        backup.customCategories
+        backup.customCategories,
+        backup.trip
       );
       state.expenses = backup.expenses;
       state.exchangeRate = backup.exchangeRate;
       state.customCategories = backup.customCategories;
+      state.trip = backup.trip;
+      applyTripProfile();
       startNewExpense();
       renderCategoryPicker("Food");
       renderAll();
       navigate("home");
+      await captureAutoBackup("after import");
       showToast("Backup restored");
     },
   });
@@ -1566,9 +2043,13 @@ function csvCell(value) {
 
 function exportCsvReport() {
   const report = reportSnapshot();
+  const primary = state.trip.primary;
+  const secondary = state.trip.secondary;
   const lines = [];
 
-  lines.push([csvCell("China Trip Expenses"), csvCell("Expense Report")].join(","));
+  lines.push(
+    [csvCell(`${state.trip.name} Expenses`), csvCell("Expense Report")].join(",")
+  );
   lines.push([csvCell("Date range"), csvCell(report.periodLabel)].join(","));
   lines.push([csvCell("Generated"), csvCell(report.generatedLabel)].join(","));
   lines.push(
@@ -1583,9 +2064,9 @@ function exportCsvReport() {
       "Date",
       "Category",
       "Description",
-      "Amount (CNY)",
-      "Amount (AED)",
-      "Exchange rate (1 AED = CNY)",
+      `Amount (${primary.code})`,
+      `Amount (${secondary.code})`,
+      `Exchange rate (1 ${secondary.code} = ${primary.code})`,
     ]
       .map(csvCell)
       .join(",")
@@ -1597,8 +2078,8 @@ function exportCsvReport() {
         expense.date,
         expense.category,
         expense.description || "",
-        formatCents(expense.cnyCents),
-        formatCents(expense.aedCents),
+        formatCents(primaryOf(expense)),
+        formatCents(secondaryOf(expense)),
         formatRate(expense.exchangeRate),
       ]
         .map(csvCell)
@@ -1614,8 +2095,8 @@ function exportCsvReport() {
         category.category,
         `${category.count} item${category.count === 1 ? "" : "s"}`,
         "",
-        formatCents(category.cnyCents),
-        formatCents(category.aedCents),
+        formatCents(category.primaryCents),
+        formatCents(category.secondaryCents),
         "",
       ]
         .map(csvCell)
@@ -1629,8 +2110,8 @@ function exportCsvReport() {
       "Grand total",
       "",
       "",
-      formatCents(report.totals.cnyCents),
-      formatCents(report.totals.aedCents),
+      formatCents(report.totals.primaryCents),
+      formatCents(report.totals.secondaryCents),
       "",
     ]
       .map(csvCell)
@@ -1648,12 +2129,18 @@ function exportCsvReport() {
 function exportPdfReport() {
   const report = reportSnapshot();
   const blob = createReportPdf({
-    expenses: report.sortedExpenses,
+    expenses: report.sortedExpenses.map((expense) => ({
+      ...expense,
+      primaryCents: primaryOf(expense),
+      secondaryCents: secondaryOf(expense),
+    })),
     totals: report.totals,
     categoryTotals: report.categories,
     rates: report.rates,
     periodLabel: report.periodLabel,
     generatedLabel: report.generatedLabel,
+    tripName: state.trip.name,
+    currency: structuredClone(state.trip),
   });
   downloadBlob(blob, `china-trip-expenses-report-${dateStamp()}.pdf`);
   showToast("PDF report exported");
@@ -1778,6 +2265,15 @@ function bindEvents() {
       return;
     }
 
+    const exportBackupButton = event.target.closest("[data-export-backup]");
+    if (exportBackupButton && elements.main.contains(exportBackupButton)) {
+      const snapshot = state.autoBackups.find(
+        (backup) => backup.id === exportBackupButton.dataset.exportBackup
+      );
+      if (snapshot) exportSnapshot(snapshot);
+      return;
+    }
+
     const deleteButton = event.target.closest("[data-delete]");
     if (deleteButton && elements.main.contains(deleteButton)) {
       confirmDeleteExpense(deleteButton.dataset.delete);
@@ -1819,6 +2315,12 @@ function bindEvents() {
 
   elements.categoryName.addEventListener("input", () => showCategoryError(""));
   elements.categoryForm.addEventListener("submit", handleCategorySubmit);
+
+  elements.tripForm.addEventListener("submit", handleTripSubmit);
+  elements.tripName.addEventListener("input", () => showTripError(""));
+  elements.exportLatestBackupBtn.addEventListener("click", exportLatestBackup);
+  elements.deleteBackupsBtn.addEventListener("click", confirmDeleteBackups);
+  elements.resetDataBtn.addEventListener("click", confirmResetData);
 
   elements.exportJsonBtn.addEventListener("click", exportJsonBackup);
   elements.importJsonBtn.addEventListener("click", () => elements.importFile.click());
@@ -1871,6 +2373,7 @@ function registerServiceWorker() {
 async function init() {
   bindEvents();
   renderIconPicker();
+  applyTripProfile();
   startNewExpense();
   elements.expenseDate.value = todayISO();
   updateRateDisplays();
@@ -1880,19 +2383,25 @@ async function init() {
 
   try {
     await openDatabase();
-    const [savedRate, storedExpenses, storedCategories] = await Promise.all([
-      getSetting("exchangeRate", DEFAULT_EXCHANGE_RATE),
-      getAllExpenses(),
-      getSetting("customCategories", []),
-    ]);
+    const [savedRate, storedExpenses, storedCategories, storedTrip, backups] =
+      await Promise.all([
+        getSetting("exchangeRate", DEFAULT_EXCHANGE_RATE),
+        getAllExpenses(),
+        getSetting("customCategories", []),
+        getSetting("tripProfile", null),
+        getAllBackups(),
+      ]);
 
     const validatedRate = normalizeRate(savedRate);
     state.exchangeRate = validatedRate || DEFAULT_EXCHANGE_RATE;
     state.customCategories = readStoredCategories(storedCategories);
+    state.trip = readStoredTrip(storedTrip);
+    state.autoBackups = Array.isArray(backups) ? backups : [];
     state.expenses = Array.isArray(storedExpenses) ? storedExpenses : [];
     state.expenses.sort(compareExpensesNewestFirst);
     state.ready = true;
 
+    applyTripProfile();
     updateRateDisplays();
     renderCategoryPicker(getSelectedCategory());
     renderAll();
