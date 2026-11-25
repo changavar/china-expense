@@ -2156,6 +2156,138 @@ textarea:focus-visible {
   }
 }
 
+/* Trip & currency settings */
+.currency-fieldset {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(7, 19, 34, 0.45);
+}
+
+.currency-fieldset legend {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.currency-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 9px;
+  margin-bottom: 9px;
+}
+
+.currency-field {
+  min-width: 0;
+}
+
+.currency-field .field-label {
+  margin-top: 0;
+}
+
+.currency-code,
+.currency-symbol {
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.currency-symbol {
+  text-transform: none;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.text-input:disabled {
+  color: var(--muted-dim);
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+#trip-form .button {
+  width: 100%;
+  margin-top: 13px;
+}
+
+.currency-toggle-wide {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+/* Automatic backups */
+.auto-backup-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.auto-backup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(7, 19, 34, 0.5);
+}
+
+.auto-backup-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.auto-backup-copy strong {
+  font-size: 11.5px;
+  font-weight: 660;
+  font-variant-numeric: tabular-nums;
+}
+
+.auto-backup-copy span {
+  overflow: hidden;
+  color: var(--muted-dim);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-backup-export {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 10px;
+  color: var(--gold);
+  background: var(--gold-soft);
+}
+
+.auto-backup-export .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Destructive settings */
+.danger-panel {
+  border-color: rgba(255, 125, 125, 0.24);
+  background: linear-gradient(180deg, rgba(64, 16, 22, 0.34), rgba(12, 20, 34, 0.72));
+}
+
+.panel-icon-danger {
+  color: #ff9c9c;
+  background: var(--danger-soft);
+}
+
+.danger-panel .button-danger {
+  width: 100%;
+  margin-top: 12px;
+}
+
 /* Responsive refinements */
 @media (max-width: 365px) {
   .main {
