@@ -1,7 +1,8 @@
 const DB_NAME = "china-trip-expenses";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const EXPENSES_STORE = "expenses";
 const SETTINGS_STORE = "settings";
+const BACKUPS_STORE = "backups";
 
 let databasePromise = null;
 
@@ -46,6 +47,13 @@ export function openDatabase() {
 
       if (!database.objectStoreNames.contains(SETTINGS_STORE)) {
         database.createObjectStore(SETTINGS_STORE, { keyPath: "key" });
+      }
+
+      if (!database.objectStoreNames.contains(BACKUPS_STORE)) {
+        const backupStore = database.createObjectStore(BACKUPS_STORE, {
+          keyPath: "id",
+        });
+        backupStore.createIndex("createdAt", "createdAt", { unique: false });
       }
     };
 
@@ -115,10 +123,15 @@ export async function setSetting(key, value) {
 }
 
 /**
- * Atomically replace every expense and the active exchange rate.
+ * Atomically replace every expense, the exchange rate, categories and trip profile.
  * Used by the confirmed backup restore flow only.
  */
-export async function replaceAllData(expenses, exchangeRate, customCategories = []) {
+export async function replaceAllData(
+  expenses,
+  exchangeRate,
+  customCategories = [],
+  tripProfile = null
+) {
   const database = await openDatabase();
   const transaction = database.transaction(
     [EXPENSES_STORE, SETTINGS_STORE],
@@ -131,7 +144,71 @@ export async function replaceAllData(expenses, exchangeRate, customCategories = 
   for (const expense of expenses) expenseStore.put(expense);
   settingsStore.put({ key: "exchangeRate", value: exchangeRate });
   settingsStore.put({ key: "customCategories", value: customCategories });
+  if (tripProfile) {
+    settingsStore.put({ key: "tripProfile", value: tripProfile });
+  }
 
+  await transactionAsPromise(transaction);
+}
+
+/**
+ * Remove all expenses and settings. Automatic backups are kept on purpose so a
+ * reset can still be recovered or exported.
+ */
+export async function clearAllData() {
+  const database = await openDatabase();
+  const transaction = database.transaction(
+    [EXPENSES_STORE, SETTINGS_STORE],
+    "readwrite"
+  );
+  transaction.objectStore(EXPENSES_STORE).clear();
+  transaction.objectStore(SETTINGS_STORE).clear();
+  await transactionAsPromise(transaction);
+}
+
+export async function addBackup(snapshot) {
+  const database = await openDatabase();
+  const transaction = database.transaction(BACKUPS_STORE, "readwrite");
+  transaction.objectStore(BACKUPS_STORE).put(snapshot);
+  await transactionAsPromise(transaction);
+  return snapshot;
+}
+
+export async function getAllBackups() {
+  const database = await openDatabase();
+  const transaction = database.transaction(BACKUPS_STORE, "readonly");
+  const result = await requestAsPromise(
+    transaction.objectStore(BACKUPS_STORE).getAll()
+  );
+  await transactionAsPromise(transaction);
+  if (!Array.isArray(result)) return [];
+  return result.sort((a, b) =>
+    String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+  );
+}
+
+export async function deleteBackup(id) {
+  const database = await openDatabase();
+  const transaction = database.transaction(BACKUPS_STORE, "readwrite");
+  transaction.objectStore(BACKUPS_STORE).delete(id);
+  await transactionAsPromise(transaction);
+}
+
+export async function clearBackups() {
+  const database = await openDatabase();
+  const transaction = database.transaction(BACKUPS_STORE, "readwrite");
+  transaction.objectStore(BACKUPS_STORE).clear();
+  await transactionAsPromise(transaction);
+}
+
+/** Keep only the newest `keep` automatic backups. */
+export async function pruneBackups(keep = 12) {
+  const backups = await getAllBackups();
+  if (backups.length <= keep) return;
+  const database = await openDatabase();
+  const transaction = database.transaction(BACKUPS_STORE, "readwrite");
+  const store = transaction.objectStore(BACKUPS_STORE);
+  for (const backup of backups.slice(keep)) store.delete(backup.id);
   await transactionAsPromise(transaction);
 }
 
