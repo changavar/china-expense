@@ -1,18 +1,25 @@
 {
   "id": "./",
-  "name": "China Trip Expenses",
-  "short_name": "China Trip",
-  "description": "A private, offline-first expense tracker for your China trip.",
+  "name": "Trip Expenses",
+  "short_name": "Trip Expenses",
+  "description": "A private, offline-first expense tracker for any trip.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "portrait-primary",
   "background_color": "#06101f",
   "theme_color": "#06101f",
-  "categories": ["travel", "finance", "productivity"],
+  "categories": [
+    "travel",
+    "finance",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "./icons/icon-192.png",
