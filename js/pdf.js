@@ -166,6 +166,15 @@ function formatMoney(cents) {
   return formatCents(cents);
 }
 
+function primaryCentsOf(expense) {
+  if (Number.isSafeInteger(expense?.primaryCents)) return expense.primaryCents;
+  return Number.isSafeInteger(expense?.cnyCents) ? expense.cnyCents : 0;
+}
+function secondaryCentsOf(expense) {
+  if (Number.isSafeInteger(expense?.secondaryCents)) return expense.secondaryCents;
+  return Number.isSafeInteger(expense?.aedCents) ? expense.aedCents : 0;
+}
+
 function buildPdfDocument(pageContents, metadata) {
   const objects = new Map();
   objects.set(1, "<< /Type /Catalog /Pages 2 0 R >>");
@@ -179,7 +188,7 @@ function buildPdfDocument(pageContents, metadata) {
   );
   objects.set(
     5,
-    `<< /Title (${escapePdfString(metadata.title)}) /Author (China Trip Expenses) /Creator (China Trip Expenses) /CreationDate (${metadata.creationDate}) >>`
+    `<< /Title (${escapePdfString(metadata.title)}) /Author (${escapePdfString(metadata.author || "China Trip Expenses")}) /Creator (${escapePdfString(metadata.author || "China Trip Expenses")}) /CreationDate (${metadata.creationDate}) >>`
   );
 
   let nextId = 6;
@@ -253,13 +262,29 @@ export function createReportPdf(report) {
   let cursorY = 0;
   let isFirstPage = false;
 
+  const currency = report.currency || {
+    primary: { code: "CNY", name: "Chinese Yuan", symbol: "¥" },
+    secondary: { code: "AED", name: "UAE Dirham", symbol: "AED" },
+  };
+  const primaryCode = currency.primary.code;
+  const secondaryCode = currency.secondary.code;
+  const tripName = report.tripName || "China Trip";
+  const documentTitle = `${tripName} Expenses`;
+  const totals = report.totals || {};
+  const totalPrimary = Number.isSafeInteger(totals.primaryCents)
+    ? totals.primaryCents
+    : totals.cnyCents || 0;
+  const totalSecondary = Number.isSafeInteger(totals.secondaryCents)
+    ? totals.secondaryCents
+    : totals.aedCents || 0;
+
   const periodLabel = report.periodLabel || "All recorded expenses";
   const generatedLabel = report.generatedLabel || "";
   const rates = Array.isArray(report.rates) && report.rates.length
     ? report.rates
     : ["1.55"];
   const ratesLine = rates
-    .map((rate) => `1 AED = ${formatRate(rate)} CNY`)
+    .map((rate) => `1 ${secondaryCode} = ${formatRate(rate)} ${primaryCode}`)
     .join("   ·   ");
 
   const add = (command) => {
@@ -273,7 +298,7 @@ export function createReportPdf(report) {
 
     if (isFirstPage) {
       add(rectCommand(0, 0, PAGE_WIDTH, 7, COLOR.navy));
-      add(textCommand(MARGIN, 41, "CHINA TRIP EXPENSES", 8, "F2", COLOR.gold));
+      add(textCommand(MARGIN, 41, asciiText(`${tripName} Expenses`).toUpperCase(), 8, "F2", COLOR.gold));
       add(textCommand(MARGIN, 69, "Expense Report", 25, "F2", COLOR.text));
       add(textCommand(MARGIN, 96, periodLabel, 10, "F1", COLOR.muted));
       if (generatedLabel) {
@@ -286,8 +311,8 @@ export function createReportPdf(report) {
       const boxHeight = 64;
 
       add(rectCommand(MARGIN, boxTop, boxWidth, boxHeight, COLOR.goldSoft, 7));
-      add(textCommand(MARGIN + 13, boxTop + 16, "TOTAL EXPENSES  /  CNY", 7, "F2", COLOR.gold));
-      add(textCommand(MARGIN + 13, boxTop + 39, `CNY ${formatMoney(report.totals.cnyCents)}`, 17, "F2", COLOR.text));
+      add(textCommand(MARGIN + 13, boxTop + 16, asciiText(`TOTAL EXPENSES  /  ${primaryCode}`), 7, "F2", COLOR.gold));
+      add(textCommand(MARGIN + 13, boxTop + 39, asciiText(`${primaryCode} ${formatMoney(totalPrimary)}`), 17, "F2", COLOR.text));
       add(
         textCommand(
           MARGIN + 13,
@@ -301,8 +326,8 @@ export function createReportPdf(report) {
 
       const secondX = MARGIN + boxWidth + 12;
       add(rectCommand(secondX, boxTop, boxWidth, boxHeight, COLOR.tealSoft, 7));
-      add(textCommand(secondX + 13, boxTop + 16, "TOTAL EXPENSES  /  AED", 7, "F2", COLOR.teal));
-      add(textCommand(secondX + 13, boxTop + 39, `AED ${formatMoney(report.totals.aedCents)}`, 17, "F2", COLOR.text));
+      add(textCommand(secondX + 13, boxTop + 16, asciiText(`TOTAL EXPENSES  /  ${secondaryCode}`), 7, "F2", COLOR.teal));
+      add(textCommand(secondX + 13, boxTop + 39, asciiText(`${secondaryCode} ${formatMoney(totalSecondary)}`), 17, "F2", COLOR.text));
       add(
         textCommand(
           secondX + 13,
@@ -327,7 +352,7 @@ export function createReportPdf(report) {
       );
       cursorY = 268;
     } else {
-      add(textCommand(MARGIN, 34, "CHINA TRIP EXPENSES", 7, "F2", COLOR.gold));
+      add(textCommand(MARGIN, 34, asciiText(`${tripName} Expenses`).toUpperCase(), 7, "F2", COLOR.gold));
       add(textCommand(MARGIN, 47, "Expense Report", 14, "F2", COLOR.text));
       add(
         textCommand(
@@ -358,8 +383,8 @@ export function createReportPdf(report) {
     add(textCommand(COLUMNS.date.x + 9, baseline, "DATE", 7, "F2", COLOR.white));
     add(textCommand(COLUMNS.category.x + 2, baseline, "CATEGORY", 7, "F2", COLOR.white));
     add(textCommand(COLUMNS.description.x + 2, baseline, "DESCRIPTION", 7, "F2", COLOR.white));
-    add(rightTextCommand(COLUMNS.cny.x + COLUMNS.cny.width, baseline, "CNY", 7, "F2", COLOR.white));
-    add(rightTextCommand(COLUMNS.aed.x + COLUMNS.aed.width, baseline, "AED", 7, "F2", COLOR.white));
+    add(rightTextCommand(COLUMNS.cny.x + COLUMNS.cny.width, baseline, asciiText(primaryCode), 7, "F2", COLOR.white));
+    add(rightTextCommand(COLUMNS.aed.x + COLUMNS.aed.width, baseline, asciiText(secondaryCode), 7, "F2", COLOR.white));
     add(rightTextCommand(COLUMNS.rate.x + COLUMNS.rate.width, baseline, "RATE", 7, "F2", COLOR.white));
     return top + 28;
   };
@@ -414,7 +439,7 @@ export function createReportPdf(report) {
       rightTextCommand(
         COLUMNS.cny.x + COLUMNS.cny.width,
         cursorY + 8,
-        formatMoney(expense.cnyCents),
+        formatMoney(primaryCentsOf(expense)),
         8.2,
         "F1",
         COLOR.muted
@@ -424,7 +449,7 @@ export function createReportPdf(report) {
       rightTextCommand(
         COLUMNS.aed.x + COLUMNS.aed.width,
         cursorY + 8,
-        formatMoney(expense.aedCents),
+        formatMoney(secondaryCentsOf(expense)),
         8.4,
         "F2",
         COLOR.text
@@ -455,8 +480,8 @@ export function createReportPdf(report) {
   cursorY += 16;
 
   add(textCommand(MARGIN, cursorY + 2, "Category", 7, "F2", COLOR.faint));
-  add(rightTextCommand(MARGIN + 430, cursorY + 2, "CNY", 7, "F2", COLOR.faint));
-  add(rightTextCommand(PAGE_WIDTH - MARGIN, cursorY + 2, "AED", 7, "F2", COLOR.faint));
+  add(rightTextCommand(MARGIN + 430, cursorY + 2, asciiText(primaryCode), 7, "F2", COLOR.faint));
+  add(rightTextCommand(PAGE_WIDTH - MARGIN, cursorY + 2, asciiText(secondaryCode), 7, "F2", COLOR.faint));
   cursorY += 12;
 
   const categories = report.categoryTotals || [];
@@ -490,7 +515,11 @@ export function createReportPdf(report) {
       rightTextCommand(
         MARGIN + 430,
         cursorY + 7,
-        formatMoney(category.cnyCents),
+        formatMoney(
+          Number.isSafeInteger(category.primaryCents)
+            ? category.primaryCents
+            : category.cnyCents || 0
+        ),
         9.2,
         "F1",
         COLOR.muted
@@ -500,7 +529,11 @@ export function createReportPdf(report) {
       rightTextCommand(
         PAGE_WIDTH - MARGIN,
         cursorY + 7,
-        formatMoney(category.aedCents),
+        formatMoney(
+          Number.isSafeInteger(category.secondaryCents)
+            ? category.secondaryCents
+            : category.aedCents || 0
+        ),
         9.4,
         "F2",
         COLOR.text
@@ -521,7 +554,7 @@ export function createReportPdf(report) {
     textCommand(
       MARGIN + 15,
       boxTop + 43,
-      `CNY ${formatMoney(report.totals.cnyCents)}`,
+      asciiText(`${primaryCode} ${formatMoney(totalPrimary)}`),
       12,
       "F1",
       COLOR.muted
@@ -531,7 +564,7 @@ export function createReportPdf(report) {
     rightTextCommand(
       PAGE_WIDTH - MARGIN - 15,
       boxTop + 43,
-      `AED ${formatMoney(report.totals.aedCents)}`,
+      asciiText(`${secondaryCode} ${formatMoney(totalSecondary)}`),
       20,
       "F2",
       COLOR.text
@@ -550,7 +583,7 @@ export function createReportPdf(report) {
 
   pages.forEach((content, index) => {
     content.push(lineCommand(MARGIN, FOOTER_TOP - 12, PAGE_WIDTH - MARGIN, FOOTER_TOP - 12, COLOR.line, 0.4));
-    content.push(textCommand(MARGIN, FOOTER_TOP, "China Trip Expenses  ·  Private & offline", 7, "F1", COLOR.faint));
+    content.push(textCommand(MARGIN, FOOTER_TOP, asciiText(`${tripName} Expenses  ·  Private & offline`), 7, "F1", COLOR.faint));
     content.push(
       rightTextCommand(
         PAGE_WIDTH - MARGIN,
@@ -565,7 +598,8 @@ export function createReportPdf(report) {
 
   const now = new Date();
   return buildPdfDocument(pages, {
-    title: "China Trip Expenses - Expense Report",
+    title: `${documentTitle} - Expense Report`,
+    author: documentTitle,
     creationDate: creationDateString(now),
   });
 }
