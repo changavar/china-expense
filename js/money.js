@@ -1,6 +1,38 @@
 export const DEFAULT_EXCHANGE_RATE = "1.55";
-export const MAX_AMOUNT_CENTS = 999_999_999_99; // ¥999,999,999.99
+export const MAX_AMOUNT_CENTS = 999_999_999_99; // 999,999,999.99
 export const MAX_RATE_DECIMALS = 6;
+
+const DEFAULT_DISPLAY = {
+  primary: { code: "CNY", name: "Chinese Yuan", symbol: "¥" },
+  secondary: { code: "AED", name: "UAE Dirham", symbol: "AED" },
+};
+
+let display = structuredClone(DEFAULT_DISPLAY);
+
+/**
+ * Set the active currency labels used by formatting helpers.
+ * The app calls this whenever the trip profile changes.
+ */
+export function setCurrencyDisplay(next) {
+  const primary = next?.primary || {};
+  const secondary = next?.secondary || {};
+  display = {
+    primary: {
+      code: primary.code || DEFAULT_DISPLAY.primary.code,
+      name: primary.name || DEFAULT_DISPLAY.primary.name,
+      symbol: primary.symbol || DEFAULT_DISPLAY.primary.symbol,
+    },
+    secondary: {
+      code: secondary.code || DEFAULT_DISPLAY.secondary.code,
+      name: secondary.name || DEFAULT_DISPLAY.secondary.name,
+      symbol: secondary.symbol || DEFAULT_DISPLAY.secondary.symbol,
+    },
+  };
+}
+
+export function getCurrencyDisplay() {
+  return structuredClone(display);
+}
 
 const amountFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -54,8 +86,7 @@ export function parseAmountToCents(raw) {
   let value = String(raw)
     .trim()
     .replace(/\s+/g, "")
-    .replace(/^¥/, "")
-    .replace(/^CNY/i, "");
+    .replace(/^[^\d,.-]+/u, "");
 
   // Accept a comma as a decimal separator, while also tolerating
   // comma-grouped amounts such as 1,200.
@@ -81,15 +112,17 @@ export function parseAmountToCents(raw) {
 export const parseCnyToCents = parseAmountToCents;
 
 /**
- * Convert CNY cents to AED cents at an exact decimal rate.
- * Formula: AED = CNY / rate.
+ * Convert destination-currency cents to home-currency cents.
+ * Formula: secondary = primary / rate.
  * Rounding is half-up at the cent level.
  */
-export function convertCnyToAedCents(cnyCents, rate) {
+export function convertPrimaryToSecondaryCents(primaryCents, rate) {
   const parsed = typeof rate === "string" ? parseRate(rate) : rate;
-  if (!parsed || !Number.isSafeInteger(cnyCents) || cnyCents < 0) return null;
+  if (!parsed || !Number.isSafeInteger(primaryCents) || primaryCents < 0) {
+    return null;
+  }
 
-  const numerator = BigInt(cnyCents) * parsed.denominator;
+  const numerator = BigInt(primaryCents) * parsed.denominator;
   const denominator = parsed.numerator;
   // floor((2n + d) / 2d) is round-half-up for positive values.
   const rounded = (2n * numerator + denominator) / (2n * denominator);
@@ -98,15 +131,17 @@ export function convertCnyToAedCents(cnyCents, rate) {
 }
 
 /**
- * Convert AED cents to CNY cents at an exact decimal rate.
- * Formula: CNY = AED * rate.
+ * Convert home-currency cents to destination-currency cents.
+ * Formula: primary = secondary * rate.
  * Rounding is half-up at the cent level.
  */
-export function convertAedToCnyCents(aedCents, rate) {
+export function convertSecondaryToPrimaryCents(secondaryCents, rate) {
   const parsed = typeof rate === "string" ? parseRate(rate) : rate;
-  if (!parsed || !Number.isSafeInteger(aedCents) || aedCents < 0) return null;
+  if (!parsed || !Number.isSafeInteger(secondaryCents) || secondaryCents < 0) {
+    return null;
+  }
 
-  const numerator = BigInt(aedCents) * parsed.numerator;
+  const numerator = BigInt(secondaryCents) * parsed.numerator;
   const denominator = parsed.denominator;
   const rounded = (2n * numerator + denominator) / (2n * denominator);
   const result = Number(rounded);
@@ -118,12 +153,13 @@ export function formatCents(cents) {
   return amountFormatter.format(safe / 100);
 }
 
-export function formatCny(cents) {
-  return `¥${formatCents(cents)}`;
+export function formatPrimary(cents) {
+  const symbol = display.primary.symbol;
+  return `${symbol}${symbol.length > 1 ? " " : ""}${formatCents(cents)}`;
 }
 
-export function formatAed(cents) {
-  return `AED ${formatCents(cents)}`;
+export function formatSecondary(cents) {
+  return `${display.secondary.code} ${formatCents(cents)}`;
 }
 
 export function formatRate(rate) {
@@ -133,7 +169,7 @@ export function formatRate(rate) {
 }
 
 export function formatRateLine(rate) {
-  return `1 AED = ${formatRate(rate)} CNY`;
+  return `1 ${display.secondary.code} = ${formatRate(rate)} ${display.primary.code}`;
 }
 
 export function centsToInputValue(cents) {
